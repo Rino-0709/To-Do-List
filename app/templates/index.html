@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Привет, {{ user.username }}!</h1>
+<form method="post" action="/add">
+    <input type="text" name="text" placeholder="Новая задача" required>
+    <button type="submit">Добавить</button>
+</form>
+
+<ul class="todo-list">
+{% for task in user.tasks %}
+    <li class="{% if task.done %}done{% endif %}">
+        <form action="/toggle/{{ task.id }}" method="post" style="display:inline;">
+            <input type="checkbox" {% if task.done %}checked{% endif %} onchange="this.form.submit()">
+        </form>
+        {{ task.text }}
+        <form action="/delete/{{ task.id }}" method="post" style="display:inline;">
+            <button type="submit" class="delete">×</button>
+        </form>
+    </li>
+{% endfor %}
+</ul>
+
+<form action="/logout" method="post">
+    <button type="submit">Выйти</button>
+</form>
+{% endblock %}
