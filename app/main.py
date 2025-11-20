@@ -3,53 +3,63 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from uuid import uuid4
-import json
 
 from utils import hash_password, verify_password, sign_data, unsign_data
 
 app = FastAPI()
+
+# <-- ЭТИ ДВЕ СТРОКИ ВАЖНЫ! Папки static и templates лежат рядом с main.py
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# В памяти хранятся пользователи (для учебного проекта)
-users_db = {}  # "alex": {"password": "$2b$...", "tasks": [...]}
+users_db = {}  # в памяти
 
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    user_data = get_user_from_cookie(request)
+def get_user_from_cookie(request: Request):
+    user_data = request.cookies.get("user_data")
     if not user_data:
+        return None
+    return unsign_data(user_data)
+
+def set_user_cookie(response: Response, user_data: dict):
+    signed = sign_data(user_data)
+    response.set_cookie(
+        key="user_data",
+        value=signed,
+        httponly=True,
+        max_age=86400*30,
+        samesite="lax"
+    )
+
+# === Страницы и роуты ===
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    user = get_user_from_cookie(request)
+    if not user:
         return RedirectResponse("/login")
-    return templates.TemplateResponse("index.html", {"request": request, "user": user_data})
+    return templates.TemplateResponse("index.html", {"request": request, "user": user})
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_get(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
 @app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
+async def register_get(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
 @app.post("/register")
-async def register(username: str = Form(), password: str = Form()):
+async def register_post(username: str = Form(), password: str = Form()):
     if username in users_db:
         raise HTTPException(400, "Пользователь уже существует")
-    users_db[username] = {
-        "password": hash_password(password),
-        "tasks": []
-    }
-    response = RedirectResponse("/login", status_code=303)
-    return response
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    users_db[username] = {"password": hash_password(password), "tasks": []}
+    return RedirectResponse("/login", status_code=303)
 
 @app.post("/login")
-async def login(response: Response, username: str = Form(), password: str = Form()):
+async def login_post(username: str = Form(), password: str = Form()):
     user = users_db.get(username)
     if not user or not verify_password(password, user["password"]):
         raise HTTPException(400, "Неверный логин или пароль")
-    
-    data = {"username": username, "tasks": user["tasks"]}
-    signed = sign_data(data)
     resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(key="user_data", value=signed, httponly=True, max_age=86400*30)
+    set_user_cookie(resp, {"username": username, "tasks": user["tasks"][:]})
     return resp
 
 @app.post("/logout")
@@ -60,44 +70,29 @@ async def logout():
 
 @app.post("/add")
 async def add_task(request: Request, text: str = Form()):
-    user_data = get_user_from_cookie(request)
-    if not user_data: return RedirectResponse("/login")
-    
-    new_task = {"id": str(uuid4())[:8], "text": text, "done": False}
-    user_data["tasks"].append(new_task)
-    update_cookie(request, user_data)
-    return RedirectResponse("/", status_code=303)
+    user = get_user_from_cookie(request)
+    if not user: return RedirectResponse("/login")
+    user["tasks"].append({"id": str(uuid4())[:8], "text": text.strip(), "done": False})
+    resp = RedirectResponse("/", status_code=303)
+    set_user_cookie(resp, user)
+    return resp
 
 @app.post("/toggle/{task_id}")
-async def toggle_task(task_id: str, request: Request):
-    user_data = get_user_from_cookie(request)
-    if not user_data: return RedirectResponse("/login")
-    
-    for task in user_data["tasks"]:
-        if task["id"] == task_id:
-            task["done"] = not task["done"]
-            break
-    update_cookie(request, user_data)
-    return RedirectResponse("/", status_code=303)
+async def toggle(task_id: str, request: Request):
+    user = get_user_from_cookie(request)
+    if not user: return RedirectResponse("/login")
+    for t in user["tasks"]:
+        if t["id"] == task_id:
+            t["done"] = not t["done"]
+    resp = RedirectResponse("/", status_code=303)
+    set_user_cookie(resp, user)
+    return resp
 
 @app.post("/delete/{task_id}")
-async def delete_task(task_id: str, request: Request):
-    user_data = get_user_from_cookie(request)
-    if not user_data: return RedirectResponse("/login")
-    
-    user_data["tasks"] = [t for t in user_data["tasks"] if t["id"] != task_id]
-    update_cookie(request, user_data)
-    return RedirectResponse("/", status_code=303)
-
-# Вспомогательные функции
-def get_user_from_cookie(request: Request):
-    cookie = request.cookies.get("user_data")
-    if not cookie:
-        return None
-    return unsign_data(cookie)
-
-def update_cookie(request: Request, user_data: dict):
-    signed = sign_data(user_data)
-    # FastAPI не даёт менять response в хендлерах напрямую → просто возвращаем редирект с новой кукой
-    # поэтому в каждом POST делаем RedirectResponse с новой кукей
-    pass
+async def delete(task_id: str, request: Request):
+    user = get_user_from_cookie(request)
+    if not user: return RedirectResponse("/login")
+    user["tasks"] = [t for t in user["tasks"] if t["id"] != task_id]
+    resp = RedirectResponse("/", status_code=303)
+    set_user_cookie(resp, user)
+    return resp
