@@ -8,11 +8,10 @@ from utils import hash_password, verify_password, sign_data, unsign_data
 
 app = FastAPI()
 
-# <-- ЭТИ ДВЕ СТРОКИ ВАЖНЫ! Папки static и templates лежат рядом с main.py
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-users_db = {}  # в памяти
+users_db = {} 
 
 def get_user_from_cookie(request: Request):
     user_data = request.cookies.get("user_data")
@@ -30,7 +29,6 @@ def set_user_cookie(response: Response, user_data: dict):
         samesite="lax"
     )
 
-# === Страницы и роуты ===
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     user = get_user_from_cookie(request)
@@ -87,6 +85,9 @@ async def toggle(task_id: str, request: Request):
     resp = RedirectResponse("/", status_code=303)
     set_user_cookie(resp, user)
     return resp
+
+
+
 
 @app.post("/delete/{task_id}")
 async def delete(task_id: str, request: Request):
