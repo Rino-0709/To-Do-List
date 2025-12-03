@@ -89,6 +89,8 @@ async def toggle(task_id: str, request: Request):
 
 
 
+
+
 @app.post("/delete/{task_id}")
 async def delete(task_id: str, request: Request):
     user = get_user_from_cookie(request)
